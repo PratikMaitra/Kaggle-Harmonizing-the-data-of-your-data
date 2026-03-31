@@ -1,0 +1,20 @@
+Python 3.10
+conda environment
+VS code/any python editor
+
+###########
+anthropic>=0.40.0
+argparse
+collections
+csv
+json
+os
+re
+subprocess
+sys
+time
+urllib
+
+##########
+
+Please put all the relevant files of the Kaggle competition github folder like Baseline Prompt, the Test set folder, the Sample Submission csv file in the directory.
