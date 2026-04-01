@@ -27,7 +27,7 @@ import argparse
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 parser = argparse.ArgumentParser(description="Stage 1: LLM extraction of SDRF metadata")
-parser.add_argument("--pubtext", default=os.path.join(BASE_DIR, "Test PubText", "Test PubText", "PubText.json"),
+parser.add_argument("--pubtext", default=os.path.join(BASE_DIR, "TestPubText", "PubText.json"),
                     help="Path to PubText.json")
 parser.add_argument("--scaffold", default=os.path.join(BASE_DIR, "SampleSubmission.csv"),
                     help="Path to SampleSubmission.csv (scaffold with ID, PXD, Raw Data File)")
@@ -59,8 +59,8 @@ for path, name in [
         sys.exit(1)
 
 ### PLEASE USE CLAUDE API KEY FOR REPLICATING OUR PIPELINE SUBMISSION ###
+#API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-#API_KEY=""
 if not API_KEY:
     print('ERROR: export ANTHROPIC_API_KEY="sk-ant-..." first')
     sys.exit(1)
@@ -152,99 +152,125 @@ Return a single JSON object. No commentary, no explanation, no markdown fences.
 <critical_behavior>
 You MUST fill as many columns as possible. Being conservative and leaving things as NA is a FAILURE.
 If you can reasonably infer a value from the text, FILL IT. Only omit if truly inapplicable.
+NEVER output placeholder values like "not available", "not specified", "unknown" — just omit the field.
 
-Specific MANDATORY fills:
-- Characteristics[Organism]: ALWAYS. Just the scientific name: "Homo sapiens", "Mus musculus". NEVER add parentheticals like "(human)".
-- Characteristics[Label]: ALWAYS. "label free" if no labeling described.
-- Characteristics[MaterialType]: ALWAYS. "cell line" if cell lines are used, "tissue" if tissue, "cells" for primary cells, "biofluid" for serum/plasma/urine.
-- Characteristics[Disease]: ALWAYS. "normal" if no disease context.
-- Comment[Instrument]: ALWAYS extract from methods. Use the SHORT commercial name: "Exploris 480" not "Orbitrap Exploris 480", "Q Exactive" not "Thermo Q Exactive".
-- Comment[AcquisitionMethod]: ALWAYS. "DDA", "DIA", "PRM", "SWATH", "MSE".
-- Comment[MS2MassAnalyzer]: ALWAYS infer from the instrument. Orbitrap instruments → "orbitrap". TripleTOF/QTOF → "TOF". LTQ/Velos (ion trap MS2) → "ion trap". Astral detector → "Astral".
-- Characteristics[Temperature]: If cell lines are cultured, use "37°C". Only omit for non-cell-culture studies where temperature is not mentioned.
-- Characteristics[NumberOfSamples]: Count total raw files or samples described. e.g. if there are 80 raw files, put "80".
-- Comment[Separation]: ALWAYS fill if LC-MS is used. "C18" or "reversed-phase C18" for standard RP columns.
+MANDATORY STUDY-LEVEL FILLS (put in _GLOBAL_):
+- Characteristics[Organism]: ALWAYS. Scientific name only: "Homo sapiens", "Mus musculus". No parentheticals.
+- Characteristics[Label]: ALWAYS. "label free" if no labeling. "TMTpro 16plex" (not just "TMTpro"), "TMT 10plex", "SILAC" if labeled. NEVER "label free sample".
+- Characteristics[MaterialType]: ALWAYS. "cell line", "tissue", "cells", "biofluid".
+- Characteristics[Disease]: ALWAYS. "normal" if healthy/no disease context.
+- Characteristics[CleavageAgent]: ALWAYS. "trypsin", "trypsin/Lys-C", "pepsin". If both trypsin and Lys-C → "trypsin/Lys-C".
+- Characteristics[ReductionReagent]: ALWAYS if mentioned. "DTT" or "TCEP". NOT enzymes.
+- Characteristics[AlkylationReagent]: ALWAYS if mentioned. "iodoacetamide" or "chloroacetamide".
+- Characteristics[Temperature]: "37°C" for any mammalian cell culture study. Fill if temperature is a study variable.
+- Characteristics[NumberOfSamples]: Count total raw files. If 24 files → "24".
+- Characteristics[NumberOfTechnicalReplicates]: Count tech reps per sample. "1" if not mentioned (default). "2" if duplicate injections. "3" if triplicate.
+- Characteristics[NumberOfBiologicalReplicates]: Count biological replicates per condition. e.g. "3" for triplicates.
+- Characteristics[Sex]: Fill if the sex/gender of the source organism or cell line is known or can be inferred. Use your biological knowledge. "male" or "female".
+- Characteristics[Specimen]: "cell culture" for cell-line studies. Describe tissue specimens (e.g. "postmortem brain", "milk serum").
+- Characteristics[DevelopmentalStage]: "adult" for adult animal studies. Fill if stated.
+- Characteristics[Strain]: Fill for animal studies when strain is mentioned in the methods.
+- Characteristics[CellLine]: Fill if a cell line is used. Use the standard cell line name.
+- Characteristics[Modification]: Database search modifications in order. See rules below.
+- Comment[Instrument]: ALWAYS. FULL name: "Orbitrap Exploris 480", "Q Exactive HF", "Orbitrap Astral", "LTQ-Orbitrap XL", "TripleTOF 5600+", "Orbitrap Fusion Lumos", "Zeno TOF 7600", "Synapt XS".
+- Comment[AcquisitionMethod]: ALWAYS. "DDA", "DIA", "PRM", "SWATH", "MSE". IDA = DDA.
 - Comment[FragmentationMethod]: ALWAYS. "HCD", "CID", "ETD", "EtHCD".
-- Characteristics[CleavageAgent]: If both trypsin and Lys-C are used together, write "trypsin/Lys-C" (not just "trypsin").
-- Characteristics[Modification]: List variable modifications FIRST (Oxidation), then fixed (Carbamidomethyl). Do NOT put labeling reagents (TMT/TMTpro) as the first modification — put them after Oxidation and Carbamidomethyl.
+- Comment[MS2MassAnalyzer]: ALWAYS infer from instrument. "orbitrap", "ion trap", "TOF", "Astral".
+- Comment[Separation]: ALWAYS. This is the ANALYTICAL column type. "C18" for reversed-phase. "FAIMS" if FAIMS used. NEVER put "SCX" or "high-pH RP" here — those are fractionation methods.
+- Comment[IonizationType]: ALWAYS. "nanoESI" if flow ≤1 µL/min. "ESI" if flow >1 µL/min.
+- Comment[CollisionEnergy]: Just the NUMBER. "32" not "32 NCE" or "32%".
+- Comment[FlowRateChromatogram]: ALWAYS in nL/min. Convert: 0.25 µL/min = "250 nL/min".
+- Comment[GradientTime]: e.g. "130 min", "90 min".
+- Comment[PrecursorMassTolerance]: e.g. "20 ppm", "10 ppm".
+- Comment[FragmentMassTolerance]: e.g. "0.02 Da", "0.5 Da". NOT FWHM. NOT lock mass.
+- Comment[NumberOfMissedCleavages]: e.g. "2".
+- Comment[EnrichmentMethod]: "immunoprecipitation" for IP/Co-IP/AP-MS. "phosphopeptide enrichment" for phospho.
+- Comment[FractionationMethod]: OFFLINE fractionation before LC-MS. "SCX", "high-pH RP", "SDS-PAGE", "MudPIT". NOT the analytical column.
+- Comment[NumberOfFractions]: Count distinct fractions from filenames.
+
+MANDATORY PER-FILE FILLS (put under each filename key):
+- Characteristics[BiologicalReplicate]: ALWAYS parse from filename. Look for rep1/rep2/BR1/BR2 patterns. If no rep marker, use sequential numbering. For TMT fractionated runs, use the run/set number.
+- Comment[FractionIdentifier]: Parse from filename. Use sequential integers: "1", "2", "3".
+- Characteristics[Treatment]: Parse from filename if conditions vary (DMSO, drug, WT, KO, mock, infected, etc.)
+- FactorValue[Treatment]: Set per-file when treatments differ across samples.
+- Characteristics[Bait]: Parse from filename if AP-MS study with bait proteins.
+- Characteristics[GeneticModification]: Parse from filename if genotypes differ (WT, KO, mutant).
+- Characteristics[Time]: Parse from filename if timepoints present (0sec, 5sec, 24h).
 </critical_behavior>
 
 <value_format>
 Every value is a SHORT string (1-5 words). No sentences. No parentheticals. No elaboration.
+NEVER use "not available", "not specified", "unknown" as values — just omit the field.
 
 WRONG: "Homo sapiens (human)" → RIGHT: "Homo sapiens"
-WRONG: "Orbitrap Exploris 480" → RIGHT: "Exploris 480"  
-WRONG: "Higher-energy collisional dissociation" → RIGHT: "HCD"
-WRONG: "FLAG immunoprecipitation" → RIGHT: "immunoprecipitation"
-WRONG: "collision-induced dissociation at 35%" → RIGHT: "CID"
-WRONG: "trypsin (Promega)" → RIGHT: "trypsin"
+WRONG: "label free sample" → RIGHT: "label free"
+WRONG: "28 NCE" → RIGHT: "28"
+WRONG: "30%" → RIGHT: "30"
+WRONG: "Orbitrap Exploris 480 mass spectrometer" → RIGHT: "Orbitrap Exploris 480"
+WRONG: "not available" → RIGHT: (omit the field entirely)
 </value_format>
 
 <categories>
 --- Characteristics (sample-level) ---
-Characteristics[Age]: e.g. "45 years", "8 weeks old"
+Characteristics[Age]: e.g. "45 years", "8 weeks"
 Characteristics[AlkylationReagent]: e.g. "iodoacetamide", "chloroacetamide"
 Characteristics[AnatomicSiteTumor]: Tumor location
 Characteristics[AncestryCategory]: Donor ethnicity
 Characteristics[BMI]: e.g. "25.3"
-Characteristics[Bait]: Bait protein in AP-MS. e.g. "SRGN", "GFP", "nsp3.1". Parse from filenames if bait names appear there.
-Characteristics[BiologicalReplicate]: Plain number: "1", "2", "3"
-Characteristics[CellLine]: e.g. "HEK293T", "HeLa", "MRC5"
-Characteristics[CellPart]: Subcellular fraction ONLY: "nucleus", "exosomes", "microvesicles". NOT cell types. NOT cell lines.
-Characteristics[CellType]: Cell type: "fibroblasts", "macrophages". NOT cell line names like "HEK293T".
+Characteristics[Bait]: Bait protein in AP-MS. Parse from filenames.
+Characteristics[BiologicalReplicate]: ALWAYS FILL. Plain number from filename: "1", "2", "3".
+Characteristics[CellLine]: Fill if a cell line is used. Use the standard name from the paper.
+Characteristics[CellPart]: Subcellular fraction ONLY: "nucleus", "exosomes", "microvesicles". NOT cell types.
+Characteristics[CellType]: Cell type: "fibroblasts", "macrophage". NOT cell line names.
 Characteristics[CleavageAgent]: e.g. "trypsin", "trypsin/Lys-C", "pepsin"
-Characteristics[Compound]: Drug/chemical. e.g. "CBK77", "cidofovir"
+Characteristics[Compound]: Drug or chemical compound used in the experiment.
 Characteristics[ConcentrationOfCompound]: e.g. "25 µM"
 Characteristics[Depletion]: Depletion method
-Characteristics[DevelopmentalStage]: e.g. "adult", "embryonic"
-Characteristics[Disease]: e.g. "Alzheimer's disease", "normal"
+Characteristics[DevelopmentalStage]: "adult" for adult animals, "embryonic" for embryos. Fill for animal studies.
+Characteristics[Disease]: "normal" for healthy. Disease name if diseased.
 Characteristics[DiseaseTreatment]: Treatment of disease
-Characteristics[GeneticModification]: e.g. "Tmem9 knockout", "PRNP F198S"
-Characteristics[Genotype]: e.g. "wild type", "C57BL/6J"
+Characteristics[GeneticModification]: e.g. "Tmem9 knockout", "PRNP F198S". Parse from filenames (WT, KO, etc.)
+Characteristics[Genotype]: e.g. "wild type". Fill if genotype information is available.
 Characteristics[GrowthRate]: Growth rate
-Characteristics[Label]: e.g. "label free", "TMT", "TMTpro 16plex", "SILAC"
-Characteristics[MaterialType]: e.g. "tissue", "cell line", "biofluid", "cells"
-Characteristics[Modification]: Database search modifications. .1, .2, etc. for multiple.
-  Order: Oxidation first, then Carbamidomethyl, then others. NOT TMT/TMTpro first.
-  Characteristics[Modification] = "Oxidation"
-  Characteristics[Modification].1 = "Carbamidomethyl"
-  Characteristics[Modification].2 = "Acetyl" (etc.)
-Characteristics[NumberOfBiologicalReplicates]: e.g. "3"
-Characteristics[NumberOfSamples]: Total number of samples or raw files. e.g. "80", "24"
-Characteristics[NumberOfTechnicalReplicates]: e.g. "2"
-Characteristics[Organism]: Scientific name ONLY. "Homo sapiens", "Mus musculus". No parentheticals.
-Characteristics[OrganismPart]: e.g. "brain", "liver", "serum"
+Characteristics[Label]: "label free", "TMTpro 16plex", "TMT", "SILAC". NEVER "label free sample".
+Characteristics[MaterialType]: "cell line", "tissue", "cells", "biofluid"
+Characteristics[Modification]: Database search modifications. For TMT: TMTpro → Carbamidomethyl → Oxidation → Met-loss → Acetyl. For label-free: Oxidation → Carbamidomethyl → Acetyl → Deamidated.
+Characteristics[NumberOfBiologicalReplicates]: Count bio reps per condition. e.g. "3"
+Characteristics[NumberOfSamples]: Count total raw files.
+Characteristics[NumberOfTechnicalReplicates]: "1" if not mentioned. "2" for duplicates. "3" for triplicates.
+Characteristics[Organism]: Scientific name ONLY. No parentheticals.
+Characteristics[OrganismPart]: e.g. "brain", "liver", "serum", "milk"
 Characteristics[OriginSiteDisease]: Anatomical site of disease
-Characteristics[PooledSample]: e.g. "pooled"
-Characteristics[ReductionReagent]: Reducing agent: "DTT", "TCEP". NOT enzymes.
+Characteristics[PooledSample]: "yes" if pooled, "no" if not
+Characteristics[ReductionReagent]: "DTT" or "TCEP". NOT enzymes.
 Characteristics[SamplingTime]: Collection timepoint
-Characteristics[Sex]: e.g. "male", "female"
-Characteristics[Specimen]: e.g. "postmortem brain", "milk serum"
+Characteristics[Sex]: Fill when sex of source organism or cell line is known or inferable. "male" or "female".
+Characteristics[Specimen]: "cell culture" for cell line studies. Describe tissue specimens.
 Characteristics[SpikedCompound]: e.g. "iRT peptides"
 Characteristics[Staining]: Staining before MS
-Characteristics[Strain]: e.g. "Sprague-Dawley", "C57BL/6J"
-Characteristics[SyntheticPeptide]: e.g. "yes"
-Characteristics[Temperature]: e.g. "37°C". Cell culture → "37°C". NOT "raw", "heated", or conditions.
-Characteristics[Time]: e.g. "0sec", "5sec", "30sec"
-Characteristics[Treatment]: e.g. "DMSO", "CBK77 25 µM"
+Characteristics[Strain]: Fill when animal strain is mentioned in methods.
+Characteristics[SyntheticPeptide]: "yes" if synthetic peptides used
+Characteristics[Temperature]: "37°C" for mammalian cell culture. Fill if temperature is studied.
+Characteristics[Time]: e.g. "0sec", "5sec", "30sec". Parse from filenames.
+Characteristics[Treatment]: Treatment applied. e.g. "DMSO", drug name with concentration. Parse from filenames.
 
 --- Comment (technical) ---
 Comment[AcquisitionMethod]: "DDA", "DIA", "PRM", "SWATH", "MSE"
-Comment[CollisionEnergy]: As stated: "32", "35%", "27 eV"
-Comment[EnrichmentMethod]: Use generic term: "immunoprecipitation" (not "FLAG IP" or "anti-FLAG IP")
-Comment[FlowRateChromatogram]: e.g. "300 nL/min", "500 nL/min"
-Comment[FractionIdentifier]: From filename. Keep as-is. e.g. "0C", "20C", "1", "F01"
-Comment[FractionationMethod]: e.g. "SCX", "high-pH RP", "SDS-PAGE", "MudPIT"
-Comment[FragmentationMethod]: Abbreviation: "HCD", "CID", "ETD", "EtHCD"
-Comment[FragmentMassTolerance]: e.g. "0.02 Da", "0.5 Da". NOT lock masses, NOT modification masses, NOT FWHM.
-Comment[GradientTime]: e.g. "120 min", "25 min"
-Comment[Instrument]: SHORT commercial name. "Q Exactive HF", "Exploris 480", "Orbitrap Astral", "TripleTOF 5600+"
-Comment[IonizationType]: "nanoESI" or "ESI" (nanoESI if nano-LC is used, ESI otherwise)
-Comment[MS2MassAnalyzer]: Infer from instrument. "orbitrap", "ion trap", "TOF", "Astral"
-Comment[NumberOfFractions]: Total fractions. e.g. "8". If filenames show fraction pattern, count them.
+Comment[CollisionEnergy]: Just the number, no units. "32" not "32 NCE".
+Comment[EnrichmentMethod]: "immunoprecipitation" for AP-MS/Co-IP. "phosphopeptide enrichment" for phospho.
+Comment[FlowRateChromatogram]: Always nL/min. "250 nL/min", "500 nL/min".
+Comment[FractionIdentifier]: Sequential integers from filename: "1", "2", "3".
+Comment[FractionationMethod]: "MudPIT", "SCX", "high-pH RP", "SDS-PAGE"
+Comment[FragmentationMethod]: "HCD", "CID", "ETD", "EtHCD"
+Comment[FragmentMassTolerance]: e.g. "0.02 Da". NOT lock masses, NOT FWHM.
+Comment[GradientTime]: e.g. "130 min"
+Comment[Instrument]: FULL name: "Orbitrap Exploris 480", "Q Exactive HF", "Orbitrap Astral"
+Comment[IonizationType]: "nanoESI" for ≤1 µL/min flow. "ESI" for >1 µL/min.
+Comment[MS2MassAnalyzer]: "orbitrap", "ion trap", "TOF", "Astral"
+Comment[NumberOfFractions]: Count distinct fractions. e.g. "8"
 Comment[NumberOfMissedCleavages]: e.g. "2"
-Comment[PrecursorMassTolerance]: e.g. "10 ppm", "20 ppm". NOT FWHM resolution values.
-Comment[Separation]: "C18", "reversed-phase C18", "FAIMS"
+Comment[PrecursorMassTolerance]: e.g. "20 ppm". NOT FWHM.
+Comment[Separation]: ANALYTICAL column. "C18" for reversed-phase. "FAIMS" if FAIMS. NEVER "SCX" (that's FractionationMethod).
 
 --- FactorValue (ONLY when that variable is compared across samples) ---
 FactorValue[Bait]: If different baits are compared
@@ -252,44 +278,56 @@ FactorValue[CellPart]: If different compartments are compared
 FactorValue[Compound]: If drug vs control is compared
 FactorValue[ConcentrationOfCompound].1: If doses are compared
 FactorValue[Disease]: If disease states are compared
-FactorValue[FractionIdentifier]: If fractions are the study variable
+FactorValue[FractionIdentifier]: If fractions are the study variable (usually NOT)
 FactorValue[GeneticModification]: If genotypes (WT vs KO) are compared
 FactorValue[Temperature]: If temperatures are compared
-FactorValue[Treatment]: If treatments are compared
+FactorValue[Treatment]: If treatments are compared across samples
 
 When you set a FactorValue, ALSO set the matching Characteristics column.
 </categories>
 
 <filename_parsing>
-IMPORTANT: Parse EVERY .raw filename systematically. Filenames encode per-file metadata.
+CRITICAL: Parse EVERY .raw filename to extract per-file metadata. This is where most per-file values come from.
 
-Common patterns:
-- Bait/target protein: if filenames contain protein names (nsp3, GFP, SRGN, T9A, T9B), extract as Characteristics[Bait] and FactorValue[Bait]
-- Replicate markers: rep1, BR1, _1/_2/_3, _R1/_R2 → BiologicalReplicate (plain number)
-- Fraction IDs: F1, frac01, 0C, 20C, 40C, 90C10B → Comment[FractionIdentifier] (keep as-is)
-- Timepoints: 0sec, 5sec, 30sec, 24h → Characteristics[Time]
-- Conditions: WT, KO, CTRL, DMSO → Treatment or GeneticModification + FactorValue
-- Cell lines: HeLa, DU145 → Characteristics[CellLine]
-- EV types: Exo, MV → Characteristics[CellPart]
+For EVERY file, you MUST extract:
+1. BiologicalReplicate: Look for rep1/rep2, BR1/BR2, _R1/_R2, or sequential numbers.
+   For TMT studies with fractions, use the run/set identifier (e.g. first 2-3 digit number in filename).
+2. FractionIdentifier: Look for F01/F02, frac1/frac2, or sequential numbers at the end of filename.
+3. Treatment/Condition: Look for DMSO/drug/WT/KO/ctrl/mock/infected/treated patterns.
+4. Bait protein: For AP-MS, look for protein/gene names that are bait targets.
+5. Time points: Look for 0sec/5sec/30sec/24h patterns.
+6. Genotype: Look for WT/KO/mutant/delta patterns.
 
-If filenames show a repeating pattern with numbered suffixes, those are likely fractions.
-Count distinct fraction IDs → Comment[NumberOfFractions].
+Common filename structures (general patterns):
+  "DATE_CONDITION_TREATMENT_CELLTYPE_REPLICATE.raw" → parse Treatment and BiologicalReplicate
+  "PLASMID_GENOTYPE_REPLICATE.raw" → parse GeneticModification and BiologicalReplicate
+  "PROTEIN_CONDITION_TIMEPOINT_REPLICATE_VIAL.raw" → parse Treatment, Time, BiologicalReplicate
+  "RUNID-RESEARCHER-DATE-BAIT-LABEL-FRACTION_NUM.raw" → parse Bait and FractionIdentifier
 </filename_parsing>
 
 <rules>
 1. FILL as many columns as possible. Being conservative is worse than being slightly wrong.
 2. Characteristics[Organism]: scientific name only, no parentheticals.
-3. Comment[Instrument]: short commercial name, no manufacturer prefix.
-4. Characteristics[Modification]: Oxidation first, then Carbamidomethyl, then others. Never TMT/label first.
-5. Comment[EnrichmentMethod]: use generic "immunoprecipitation" not specific "FLAG IP".
+3. Comment[Instrument]: FULL standard name with Orbitrap prefix where applicable.
+4. Characteristics[Modification] order: TMT studies: TMTpro → Carbamidomethyl → Oxidation → Met-loss → Acetyl. Label-free: Oxidation → Carbamidomethyl → Acetyl → Deamidated.
+5. Comment[EnrichmentMethod]: "immunoprecipitation" not "FLAG IP".
 6. CellType ≠ CellLine. CellPart = subcellular fraction only.
 7. FragmentMassTolerance = mass tolerance only. PrecursorMassTolerance = mass tolerance only.
 8. ReductionReagent = reducing agent only (DTT, TCEP), not enzymes.
-9. Parse filenames aggressively for bait, fraction, replicate, and condition info.
+9. Parse filenames aggressively — this is where BiologicalReplicate, Treatment, Bait, Time come from.
+10. NEVER output "not available", "not specified", "unknown" — just omit.
+11. Characteristics[Label]: exactly "label free". NEVER "label free sample".
+12. Comment[CollisionEnergy]: just the number. "32" not "32 NCE".
+13. Comment[FlowRateChromatogram]: always nL/min.
+14. Characteristics[Sex]: FILL when the sex of the source organism or cell line is known. Use your knowledge.
+15. Characteristics[NumberOfTechnicalReplicates]: "1" if not explicitly stated otherwise.
+16. Characteristics[Specimen]: "cell culture" for cell line studies. ALWAYS fill.
+17. Characteristics[BiologicalReplicate]: ALWAYS parse from filename. Every file must have one.
 </rules>
 
 <output_format>
-Single JSON object. "_GLOBAL_" for shared metadata. Per-file keys only for values that differ.
+Single JSON object. "_GLOBAL_" for shared metadata. Per-file keys for values that DIFFER between files.
+You MUST have per-file entries for BiologicalReplicate, FractionIdentifier, Treatment, Bait, Time, etc.
 Each value: a SHORT string. Not a list, not a sentence, no parentheticals.
 
 {
@@ -297,51 +335,95 @@ Each value: a SHORT string. Not a list, not a sentence, no parentheticals.
     "Characteristics[Organism]": "Homo sapiens",
     "Characteristics[Disease]": "normal",
     "Characteristics[MaterialType]": "cell line",
-    "Characteristics[CellLine]": "HEK293T",
+    "Characteristics[CellLine]": "CellLineName",
+    "Characteristics[Sex]": "female",
     "Characteristics[CleavageAgent]": "trypsin/Lys-C",
-    "Characteristics[Label]": "TMTpro 16plex",
+    "Characteristics[Label]": "label free",
     "Characteristics[Temperature]": "37°C",
-    "Characteristics[Modification]": "Oxidation",
-    "Characteristics[Modification].1": "Carbamidomethyl",
-    "Characteristics[Modification].2": "Acetyl",
-    "Characteristics[NumberOfSamples]": "80",
-    "Comment[Instrument]": "Exploris 480",
+    "Characteristics[Specimen]": "cell culture",
+    "Characteristics[NumberOfTechnicalReplicates]": "1",
+    "Characteristics[NumberOfBiologicalReplicates]": "3",
+    "Characteristics[NumberOfSamples]": "24",
+    "Characteristics[Modification]": ["Oxidation", "Carbamidomethyl", "Acetyl"],
+    "Characteristics[ReductionReagent]": "DTT",
+    "Characteristics[AlkylationReagent]": "iodoacetamide",
+    "Comment[Instrument]": "Q Exactive HF",
     "Comment[AcquisitionMethod]": "DDA",
     "Comment[FragmentationMethod]": "HCD",
     "Comment[MS2MassAnalyzer]": "orbitrap",
     "Comment[Separation]": "C18",
-    "Comment[CollisionEnergy]": "32",
+    "Comment[CollisionEnergy]": "28",
     "Comment[EnrichmentMethod]": "immunoprecipitation",
     "Comment[IonizationType]": "nanoESI",
-    "Comment[NumberOfFractions]": "8",
     "Comment[NumberOfMissedCleavages]": "2",
-    "Comment[PrecursorMassTolerance]": "20 ppm",
+    "Comment[PrecursorMassTolerance]": "10 ppm",
     "Comment[FragmentMassTolerance]": "0.02 Da",
-    "Comment[FlowRateChromatogram]": "500 nL/min",
-    "Comment[GradientTime]": "130 min",
-    "Characteristics[ReductionReagent]": "TCEP",
-    "Characteristics[AlkylationReagent]": "chloroacetamide"
+    "Comment[FlowRateChromatogram]": "250 nL/min",
+    "Comment[GradientTime]": "150 min"
   },
-  "nsp3.1_rep1_0C.raw": {
-    "Characteristics[Bait]": "nsp3.1",
-    "FactorValue[Bait]": "nsp3.1",
-    "Characteristics[BiologicalReplicate]": "1",
-    "Comment[FractionIdentifier]": "0C"
+  "sample_condition1_rep1.raw": {
+    "Characteristics[Treatment]": "condition1",
+    "FactorValue[Treatment]": "condition1",
+    "Characteristics[BiologicalReplicate]": "1"
   },
-  "GFP_rep1_0C.raw": {
-    "Characteristics[Bait]": "GFP",
-    "FactorValue[Bait]": "GFP",
-    "Characteristics[BiologicalReplicate]": "1",
-    "Comment[FractionIdentifier]": "0C"
+  "sample_condition2_rep1.raw": {
+    "Characteristics[Treatment]": "condition2",
+    "FactorValue[Treatment]": "condition2",
+    "Characteristics[BiologicalReplicate]": "1"
+  },
+  "sample_condition1_rep2.raw": {
+    "Characteristics[Treatment]": "condition1",
+    "FactorValue[Treatment]": "condition1",
+    "Characteristics[BiologicalReplicate]": "2"
   }
 }
 </output_format>"""
 
 
-def build_prompt(title, abstract, methods, raw_files):
-    manuscript = f"TITLE:\n{title}\n\nABSTRACT:\n{abstract}\n\nMETHODS:\n{methods}"
-    if len(manuscript) > 60000:
-        manuscript = f"TITLE:\n{title}\n\nABSTRACT:\n{abstract}\n\nMETHODS:\n{methods[:40000]}\n[...truncated...]"
+def build_prompt(paper, raw_files):
+    """Build prompt with ALL paper sections, not just title/abstract/methods."""
+    title = paper.get('TITLE', '')
+    abstract = paper.get('ABSTRACT', '')
+    methods = paper.get('METHODS', '')
+    intro = paper.get('INTRO', '')
+    results = paper.get('RESULTS', '')
+    discuss = paper.get('DISCUSS', '')
+    fig = paper.get('FIG', '')
+    
+    # Build full manuscript with all sections
+    sections = []
+    if title:
+        sections.append(f"TITLE:\n{title}")
+    if abstract:
+        sections.append(f"ABSTRACT:\n{abstract}")
+    if intro:
+        sections.append(f"INTRODUCTION:\n{intro}")
+    if results:
+        sections.append(f"RESULTS:\n{results}")
+    if discuss:
+        sections.append(f"DISCUSSION:\n{discuss}")
+    if methods:
+        sections.append(f"METHODS:\n{methods}")
+    if fig:
+        sections.append(f"FIGURES:\n{fig}")
+    
+    manuscript = "\n\n".join(sections)
+    
+    # Truncation: prioritize METHODS, ABSTRACT, TITLE, then others
+    if len(manuscript) > 150000:
+        # Keep title, abstract, methods in full; truncate others
+        core = f"TITLE:\n{title}\n\nABSTRACT:\n{abstract}\n\nMETHODS:\n{methods}"
+        remaining_budget = 150000 - len(core)
+        extras = []
+        for section_name, section_text in [("RESULTS", results), ("INTRODUCTION", intro), 
+                                            ("FIGURES", fig), ("DISCUSSION", discuss)]:
+            if section_text and remaining_budget > 1000:
+                chunk = section_text[:remaining_budget]
+                extras.append(f"{section_name}:\n{chunk}")
+                remaining_budget -= len(chunk)
+        manuscript = core + "\n\n" + "\n\n".join(extras) if extras else core
+        manuscript += "\n[...some sections truncated for length...]"
+    
     files_block = "\n".join(raw_files)
 
     return f"""{IMPROVED_PROMPT}
@@ -358,11 +440,18 @@ def build_prompt(title, abstract, methods, raw_files):
 client = anthropic.Anthropic(api_key=API_KEY)
 
 
+SYSTEM_PROMPT = """You are a proteomics expert specializing in SDRF metadata extraction. 
+You read scientific papers and extract structured metadata with high accuracy.
+You understand mass spectrometry instruments, sample preparation, and SDRF standards.
+Return ONLY valid JSON. No explanations, no markdown, no commentary."""
+
+
 def call_api(prompt, max_retries=3):
     for attempt in range(max_retries):
         try:
             with client.messages.stream(
                 model=MODEL, max_tokens=MAX_TOKENS,
+                system=SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": prompt}]
             ) as stream:
                 msg = stream.get_final_message()
@@ -455,9 +544,7 @@ for i, pxd_id in enumerate(sorted(pubtext.keys())):
         continue
 
     prompt = build_prompt(
-        paper.get('TITLE', ''),
-        paper.get('ABSTRACT', ''),
-        paper.get('METHODS', ''),
+        paper,
         sub_files
     )
     print(f"[{i+1}/15] {pxd_id}: {len(sub_files)} files, prompt {len(prompt)//1000}K chars — calling API...")
